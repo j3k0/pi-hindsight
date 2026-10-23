@@ -1476,3 +1476,23 @@ describe("applyEnvOverrides", { skip: !extensionDepsInstalled && "extension deps
     assert.equal(merged.global_bank, "");
   });
 });
+
+describe("resolveApiKey", { skip: !extensionDepsInstalled && "extension deps not installed (run npm ci)" }, () => {
+  let resolveApiKey: (merged: Record<string, string>) => string | undefined;
+  before(async () => {
+    ({ resolveApiKey } = await import("./index.ts"));
+  });
+  after(() => { delete process.env.PI_HINDSIGHT_TEST_KEY; });
+
+  test("uses api_key without api_key_env", () => {
+    assert.equal(resolveApiKey({ api_key: "file-key" }), "file-key");
+  });
+  test("api_key_env wins over api_key", () => {
+    process.env.PI_HINDSIGHT_TEST_KEY = "env-key";
+    assert.equal(resolveApiKey({ api_key: "file-key", api_key_env: "PI_HINDSIGHT_TEST_KEY" }), "env-key");
+  });
+  test("unset api_key_env variable fails closed (no fallback to api_key)", () => {
+    delete process.env.PI_HINDSIGHT_TEST_KEY;
+    assert.equal(resolveApiKey({ api_key: "file-key", api_key_env: "PI_HINDSIGHT_TEST_KEY" }), "");
+  });
+});

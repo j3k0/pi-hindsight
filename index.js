@@ -58,7 +58,7 @@ function getConfig() {
         const homedir_project = merged.homedir_project === "false" ? false : true;
         return {
             api_url: merged.api_url,
-            api_key: merged.api_key,
+            api_key: resolveApiKey(merged),
             global_bank: merged.global_bank,
             project_bank_id: merged.project_bank_id,
             recall_types,
@@ -188,6 +188,14 @@ function getConfigWithSource() {
 //
 // Without HINDSIGHT_BANK_ID this is a no-op — config-driven setups are
 // unaffected.
+// api_key_env names an environment variable holding the key (e.g. a per-agent LiteLLM key
+// checked by an authenticating gate). When set it wins over api_key, and an unset or empty
+// variable yields no key: fail closed, never fall back to a shared key from the file.
+export function resolveApiKey(merged) {
+  if (merged.api_key_env) return process.env[merged.api_key_env] || "";
+  return merged.api_key;
+}
+
 export function applyEnvOverrides(merged) {
     const bank = process.env.HINDSIGHT_BANK_ID?.trim();
     if (!bank)
@@ -658,7 +666,7 @@ export default function hindsightExtension(pi) {
             try {
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), config.recall_timeout ?? 10000);
-                const res = await fetch(`${config.api_url}/v1/default/banks/${bank}/memories/reflect`, {
+                const res = await fetch(`${config.api_url}/v1/default/banks/${bank}/reflect`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
