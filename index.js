@@ -42,7 +42,7 @@ function getConfig() {
         // Project-level override: .hindsight/config in CWD
         const localCfgPath = join(sessionCwd, ".hindsight", "config");
         const local = existsSync(localCfgPath) ? parseConfigFile(localCfgPath) : {};
-        const merged = applyAliases({ ...global, ...local });
+        const merged = mergeConfigs(applyAliases(global), applyAliases(local));
         applyEnvOverrides(merged);
         const recallTypesRaw = merged.recall_types;
         const recall_types = recallTypesRaw
@@ -58,7 +58,7 @@ function getConfig() {
         const homedir_project = merged.homedir_project === "false" ? false : true;
         return {
             api_url: merged.api_url,
-            api_key: merged.api_key,
+            api_key: resolveApiKey(merged),
             global_bank: merged.global_bank,
             project_bank_id: merged.project_bank_id,
             recall_types,
@@ -159,7 +159,7 @@ function getConfigWithSource() {
     const localRaw = (!isHomeDir && existsSync(localCfgPath)) ? parseConfigFile(localCfgPath) : {};
     const global = applyAliases(globalRaw);
     const local = applyAliases(localRaw);
-    const merged = { ...global, ...local };
+    const merged = mergeConfigs(global, local);
     applyEnvOverrides(merged); // reflect env overrides in the /hindsight settings view
     return { global, local, merged, isHomeDir };
 }
@@ -188,6 +188,29 @@ function getConfigWithSource() {
 //
 // Without HINDSIGHT_BANK_ID this is a no-op — config-driven setups are
 // unaffected.
+// Project config (.hindsight/config in the working directory) overrides the global one, except
+// api_key_env, which is read from ~/.hindsight/config only: a repo must not pick which env
+// secret gets sent. When the global file sets api_key_env, api_url is pinned to the global
+// value too, so a repo can't redirect that key elsewhere either.
+export function mergeConfigs(global, local) {
+  const merged = { ...global, ...local };
+  delete merged.api_key_env;
+  if (global.api_key_env) {
+    merged.api_key_env = global.api_key_env;
+    if (global.api_url !== undefined) merged.api_url = global.api_url;
+    else delete merged.api_url;   // unset globally = unset, never the project's value
+  }
+  return merged;
+}
+
+// api_key_env names an environment variable holding the key (e.g. a per-agent LiteLLM key
+// checked by an authenticating gate). When set it wins over api_key, and an unset or empty
+// variable yields no key: fail closed, never fall back to a shared key from the file.
+export function resolveApiKey(merged) {
+  if (merged.api_key_env) return process.env[merged.api_key_env] || "";
+  return merged.api_key;
+}
+
 export function applyEnvOverrides(merged) {
     const bank = process.env.HINDSIGHT_BANK_ID?.trim();
     if (!bank)
@@ -658,7 +681,7 @@ export default function hindsightExtension(pi) {
             try {
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), config.recall_timeout ?? 10000);
-                const res = await fetch(`${config.api_url}/v1/default/banks/${bank}/memories/reflect`, {
+                const res = await fetch(`${config.api_url}/v1/default/banks/${bank}/reflect`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",

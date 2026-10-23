@@ -137,6 +137,7 @@ recall_max_tokens = 512
 | `recall_enabled` | `true` | Enable automatic recall before agent turns. Set `false` to disable auto-recall for this project. Manual `hindsight_recall` tool still works. |
 | `retain_enabled` | `true` | Enable automatic retain after agent turns. Set `false` to disable auto-retain for this project. Manual `hindsight_retain` tool still works. |
 | `homedir_project` | `true` | Treat home directory as a project. Set `false` to prevent creating a `project-<username>` bank when running Pi from your home directory. Recall and retain use only `global_bank` instead. |
+| `api_key_env` | _(none)_ | Name of an environment variable that holds the API key, e.g. `LITELLM_PI_KEY`. When set it replaces `api_key`; if the variable is unset or empty, no key is sent (no fallback to `api_key`). Lets one shared config file serve several agents that each carry their own key, e.g. behind an authenticating gate. Read from `~/.hindsight/config` only (a project `.hindsight/config` can't set it), and while it is set the project file can't override `api_url` either. |
 | `global_bank` | _(none)_ | Bank ID for cross-project memory. When set, this bank is queried alongside the project bank on every recall. Turns tagged `#global` or `#me` are also retained here. Leave unset if you only want per-project memory. |
 
 ### Environment variable overrides

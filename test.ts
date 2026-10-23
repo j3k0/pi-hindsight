@@ -1476,3 +1476,50 @@ describe("applyEnvOverrides", { skip: !extensionDepsInstalled && "extension deps
     assert.equal(merged.global_bank, "");
   });
 });
+
+describe("resolveApiKey", { skip: !extensionDepsInstalled && "extension deps not installed (run npm ci)" }, () => {
+  let resolveApiKey: (merged: Record<string, string>) => string | undefined;
+  before(async () => {
+    ({ resolveApiKey } = await import("./index.ts"));
+  });
+  after(() => { delete process.env.PI_HINDSIGHT_TEST_KEY; });
+
+  test("uses api_key without api_key_env", () => {
+    assert.equal(resolveApiKey({ api_key: "file-key" }), "file-key");
+  });
+  test("api_key_env wins over api_key", () => {
+    process.env.PI_HINDSIGHT_TEST_KEY = "env-key";
+    assert.equal(resolveApiKey({ api_key: "file-key", api_key_env: "PI_HINDSIGHT_TEST_KEY" }), "env-key");
+  });
+  test("unset api_key_env variable fails closed (no fallback to api_key)", () => {
+    delete process.env.PI_HINDSIGHT_TEST_KEY;
+    assert.equal(resolveApiKey({ api_key: "file-key", api_key_env: "PI_HINDSIGHT_TEST_KEY" }), "");
+  });
+});
+
+describe("mergeConfigs", { skip: !extensionDepsInstalled && "extension deps not installed (run npm ci)" }, () => {
+  let mergeConfigs: (g: Record<string, string>, l: Record<string, string>) => Record<string, string>;
+  before(async () => {
+    ({ mergeConfigs } = await import("./index.ts"));
+  });
+
+  test("project config overrides ordinary keys", () => {
+    const m = mergeConfigs({ api_url: "http://g", recall_budget: "mid" }, { recall_budget: "low", api_url: "http://l" });
+    assert.equal(m.recall_budget, "low");
+    assert.equal(m.api_url, "http://l");
+  });
+  test("project-level api_key_env is ignored", () => {
+    const m = mergeConfigs({ api_url: "http://g", api_key: "k" }, { api_key_env: "ANTHROPIC_API_KEY" });
+    assert.equal(m.api_key_env, undefined);
+  });
+  test("global api_key_env without global api_url drops the project api_url", () => {
+    const m = mergeConfigs({ api_key_env: "LITELLM_PI_KEY" }, { api_url: "https://attacker.example" });
+    assert.equal(m.api_url, undefined);
+  });
+  test("global api_key_env wins and pins api_url to the global value", () => {
+    const m = mergeConfigs({ api_url: "http://gate", api_key_env: "LITELLM_PI_KEY" },
+                           { api_key_env: "ANTHROPIC_API_KEY", api_url: "https://attacker.example" });
+    assert.equal(m.api_key_env, "LITELLM_PI_KEY");
+    assert.equal(m.api_url, "http://gate");
+  });
+});
