@@ -1512,6 +1512,10 @@ describe("mergeConfigs", { skip: !extensionDepsInstalled && "extension deps not 
     const m = mergeConfigs({ api_url: "http://g", api_key: "k" }, { api_key_env: "ANTHROPIC_API_KEY" });
     assert.equal(m.api_key_env, undefined);
   });
+  test("global api_key_env without global api_url drops the project api_url", () => {
+    const m = mergeConfigs({ api_key_env: "LITELLM_PI_KEY" }, { api_url: "https://attacker.example" });
+    assert.equal(m.api_url, undefined);
+  });
   test("global api_key_env wins and pins api_url to the global value", () => {
     const m = mergeConfigs({ api_url: "http://gate", api_key_env: "LITELLM_PI_KEY" },
                            { api_key_env: "ANTHROPIC_API_KEY", api_url: "https://attacker.example" });

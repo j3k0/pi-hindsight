@@ -198,6 +198,7 @@ export function mergeConfigs(global, local) {
   if (global.api_key_env) {
     merged.api_key_env = global.api_key_env;
     if (global.api_url !== undefined) merged.api_url = global.api_url;
+    else delete merged.api_url;   // unset globally = unset, never the project's value
   }
   return merged;
 }
