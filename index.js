@@ -51,6 +51,7 @@ function getConfig() {
         const recall_budget = merged.recall_budget || "mid";
         const recall_max_tokens = merged.recall_max_tokens ? parseInt(merged.recall_max_tokens, 10) : undefined;
         const recall_timeout = merged.recall_timeout ? parseInt(merged.recall_timeout, 10) : undefined;
+        const reflect_timeout = merged.reflect_timeout ? parseInt(merged.reflect_timeout, 10) : undefined;
         const async_retain = merged.async_retain === "false" ? false : true;
         const retain_feedback = merged.retain_feedback || "status";
         const recall_enabled = merged.recall_enabled === "false" ? false : true;
@@ -65,6 +66,7 @@ function getConfig() {
             recall_budget,
             recall_max_tokens,
             recall_timeout,
+            reflect_timeout,
             async_retain,
             retain_feedback,
             recall_enabled,
@@ -680,7 +682,8 @@ export default function hindsightExtension(pi) {
             const bank = getProjectBank(config);
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), config.recall_timeout ?? 10000);
+                // Reflect runs an LLM loop (often 20-60 s), far longer than recall, so it gets its own timeout.
+                const timeout = setTimeout(() => controller.abort(), config.reflect_timeout ?? 120000);
                 const res = await fetch(`${config.api_url}/v1/default/banks/${bank}/reflect`, {
                     method: "POST",
                     headers: {
@@ -693,9 +696,11 @@ export default function hindsightExtension(pi) {
                 clearTimeout(timeout);
                 if (res.ok) {
                     const data = await res.json();
-                    return { content: [{ type: "text", text: data.synthesis || JSON.stringify(data) }], details: {} };
+                    // Hindsight 1.x returns the answer in `text`; older servers used `synthesis`.
+                    return { content: [{ type: "text", text: data.text || data.synthesis || JSON.stringify(data) }], details: {} };
                 }
-                return { content: [{ type: "text", text: "Failed to reflect." }], details: {}, isError: true };
+                const body = (await res.text().catch(() => "")).slice(0, 300);
+                return { content: [{ type: "text", text: `Failed to reflect (HTTP ${res.status})${body ? `: ${body}` : "."}` }], details: {}, isError: true };
             }
             catch (e) {
                 return { content: [{ type: "text", text: `Error: ${e}` }], details: {}, isError: true };
