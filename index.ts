@@ -31,13 +31,14 @@ function log(msg: string) {
 // Config & Helpers
 // ---------------------------------------------------------------------------
 
-interface HindsightConfig {
+export interface HindsightConfig {
   api_url?: string;
   api_key?: string;
   api_key_env?: string;
   global_bank?: string;
   project_bank_id?: string;
   recall_types?: string[];
+  recall_dates_banks?: string[];
   recall_budget?: string;
   recall_max_tokens?: number;
   recall_timeout?: number;
@@ -76,6 +77,12 @@ function getConfig(): HindsightConfig | null {
     const recall_types = recallTypesRaw
       ? recallTypesRaw.split(",").map((t) => t.trim()).filter(Boolean)
       : ["observation"];
+    // Pilot gate (FOV-2735): only banks listed here get the age + re-check rule
+    // rendering. Absent or empty keeps today's output byte for byte.
+    const recallDatesBanksRaw = merged.recall_dates_banks;
+    const recall_dates_banks = recallDatesBanksRaw
+      ? recallDatesBanksRaw.split(",").map((b) => b.trim()).filter(Boolean)
+      : [];
     const recall_budget = merged.recall_budget || "mid";
     const recall_max_tokens = merged.recall_max_tokens ? parseInt(merged.recall_max_tokens, 10) : undefined;
     const recall_timeout = merged.recall_timeout ? parseInt(merged.recall_timeout, 10) : undefined;
@@ -91,6 +98,7 @@ function getConfig(): HindsightConfig | null {
       global_bank: merged.global_bank,
       project_bank_id: merged.project_bank_id,
       recall_types,
+      recall_dates_banks,
       recall_budget,
       recall_max_tokens,
       recall_timeout,
@@ -506,6 +514,71 @@ export async function runMissionAutoSetup(config: HindsightConfig): Promise<void
 // Extension
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Recall rendering (FOV-2735: show each memory's age + the re-check rule)
+// ---------------------------------------------------------------------------
+
+export const RECALL_HEADER = "Relevant memories from past conversations:";
+export const RECALL_HEADER_DATED =
+  "Recalled memory \u2014 observations from earlier runs, not live facts. " +
+  "Each item says when it was last checked. Anything about a tool, skill, service, token, " +
+  "quota, host or an issue's status may have changed since: re-check it before acting, " +
+  "and trust your own skill/tool list and a fresh command over memory when they disagree.";
+
+// Age of a timestamp: "today", "1 day ago", "N days ago" (2–14), "N weeks ago" (>14).
+// Undefined when the timestamp is missing or unparseable.
+export function agePhrase(ts: unknown, now: Date = new Date()): string | undefined {
+  if (typeof ts !== "string" || !ts.trim()) return undefined;
+  const t = new Date(ts).getTime();
+  if (Number.isNaN(t)) return undefined;
+  const days = Math.floor((now.getTime() - t) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day ago";
+  if (days <= 14) return `${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  return `${weeks} weeks ago`;
+}
+
+// Absolute ISO date (YYYY-MM-DD) for display alongside the age.
+export function dateOnly(ts: unknown): string | undefined {
+  if (typeof ts !== "string") return undefined;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(ts);
+  if (m) return m[1];
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString().slice(0, 10);
+}
+
+// Render one recalled memory. Undated = today's exact format ("[Bank: x] - <text>");
+// dated = "[Bank: x] - [<type>, checked <age> \u2014 <date>] <text>".
+// Age source: occurred_start (when it was last checked) ?? mentioned_at (when it
+// was retained) ?? date. The [Bank: …] - prefix must stay: transcripts strip
+// <hindsight_memories> blocks and classifier routing depends on the tag.
+export function renderRecallItem(
+  bank: string,
+  result: any,
+  dated: boolean,
+  now: Date = new Date(),
+): string {
+  const text = result?.text ?? "";
+  if (!dated) return `[Bank: ${bank}] - ${text}`;
+  const parts: string[] = [];
+  if (typeof result?.type === "string" && result.type) parts.push(result.type);
+  const ts =
+    result?.occurred_start ?? result?.occurredStart ??
+    result?.mentioned_at ?? result?.mentionedAt ?? result?.date;
+  const age = agePhrase(ts, now);
+  const date = dateOnly(ts);
+  if (age && date) parts.push(`checked ${age} \u2014 ${date}`);
+  else if (age) parts.push(`checked ${age}`);
+  else parts.push("no date recorded");
+  return `[Bank: ${bank}] - [${parts.join(", ")}] ${text}`;
+}
+
+export function isDatedBank(config: HindsightConfig, bank: string): boolean {
+  return (config.recall_dates_banks || []).includes(bank);
+}
+
 const MAX_RECALL_ATTEMPTS = 3;
 const RATE_LIMIT_RETRIES = 3;
 const RATE_LIMIT_BACKOFF_MS = [10000, 20000, 40000];
@@ -684,7 +757,8 @@ export default function hindsightExtension(pi: ExtensionAPI) {
             if (rateLimitExhausted) return { __rateLimited: true };
             if (!res.ok) return [];
             const data = await res.json();
-            return (data.results || []).map((r: any) => `[Bank: ${bank}] - ${r.text}`);
+            const dated = isDatedBank(config, bank);
+            return (data.results || []).map((r: any) => renderRecallItem(bank, r, dated));
           } catch (e: any) {
             log(`hindsight_recall: bank=${bank} error ${e}`);
             return [];
@@ -851,7 +925,8 @@ export default function hindsightExtension(pi: ExtensionAPI) {
           }
           anyBankSucceeded = true;
           const data = await res.json();
-          const results = (data.results || []).map((r: any) => `[Bank: ${bank}] - ${r.text}`);
+          const dated = isDatedBank(config, bank);
+          const results = (data.results || []).map((r: any) => renderRecallItem(bank, r, dated));
           log(`before_agent_start: bank=${bank} got ${results.length} results`);
           return results;
         } catch (e: any) {
@@ -888,7 +963,9 @@ export default function hindsightExtension(pi: ExtensionAPI) {
           hookStats.recall = { firedAt: new Date().toISOString(), result: "ok", detail: `${allResults.length} memories` };
           log(`before_agent_start: injecting ${allResults.length} memories into context`);
           const memoriesStr = allResults.join("\n\n");
-          const content = `<hindsight_memories>\nRelevant memories from past conversations:\n\n${memoriesStr}\n</hindsight_memories>`;
+          const anyDated = banks.some(b => isDatedBank(config, b));
+          const header = anyDated ? RECALL_HEADER_DATED : RECALL_HEADER;
+          const content = `<hindsight_memories>\n${header}\n\n${memoriesStr}\n</hindsight_memories>`;
           const count = allResults.length;
           const snippet = allResults
             .slice(0, 3)
@@ -1247,6 +1324,7 @@ export default function hindsightExtension(pi: ExtensionAPI) {
           { key: "retain_feedback", label: "Retain Feedback", isBool: false, default: "status" },
           { key: "homedir_project", label: "Home Dir as Project", isBool: true, default: "true" },
           { key: "recall_types", label: "Recall Types", isBool: false, default: "observation" },
+          { key: "recall_dates_banks", label: "Recall Date Banks", isBool: false, default: "(off)" },
           { key: "recall_budget", label: "Recall Budget", isBool: false, default: "mid" },
           { key: "recall_max_tokens", label: "Max Tokens", isBool: false, default: "(default)" },
         ];
