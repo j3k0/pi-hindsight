@@ -131,6 +131,7 @@ recall_max_tokens = 512
 | Key | Default | Description |
 |-----|---------|-------------|
 | `recall_types` | `observation` | Memory types to search: `observation`, `world`, `experience`. Comma-separated. Each type runs the full retrieval pipeline independently. |
+| `recall_dates_banks` | _(off)_ | Pilot gate: comma-separated bank ids that get dated recall output — each injected memory is prefixed with its fact type and age (`[observation, checked 7 days ago — 2026-11-04] …`), and the recall header tells the agent these are past observations to re-check before acting. Absent or empty keeps the plain output. |
 | `recall_budget` | `mid` | Retrieval depth: `low`, `mid`, `high`. Higher = more coverage but added latency. |
 | `recall_max_tokens` | Server default (4096) | Max tokens for injected memories. Lower values reduce context noise. Recommended: `800`. |
 | `async_retain` | `true` | Non-blocking retain. Set `false` for sync retain with failure notifications. |
