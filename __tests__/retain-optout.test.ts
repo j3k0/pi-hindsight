@@ -17,15 +17,8 @@ import * as os from "node:os";
 
 const EXTENSION = path.resolve(__dirname, "../index.ts");
 
-// pi-test-harness 0.6.1 imports `getModel` from pi-ai, removed in 1.5.2.
-// The model is never actually streamed (playbook replaces streamFn) — hand the
-// harness a faux model so session creation passes validation.
-vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  const { fauxProvider } = actual as typeof import("@earendil-works/pi-ai");
-  const faux = fauxProvider();
-  return { ...actual, getModel: () => faux.models[0] };
-});
+// The harness's `getModel` import (removed from pi-ai in 1.5.2) is satisfied by
+// the vitest alias to __tests__/pi-ai-shim.ts — nothing to do here.
 
 const RETAIN_BANK = "test-global";
 
