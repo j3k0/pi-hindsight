@@ -298,9 +298,17 @@ function getLastUserMessage(ctx: any, fallbackPrompt: string): string {
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e.type === "message" && e.message?.role === "user") {
-        return typeof e.message.content === "string"
-          ? e.message.content
-          : JSON.stringify(e.message.content);
+        const content = e.message.content;
+        if (typeof content === "string") return content;
+        // pi stores user messages as an array of blocks; join the text blocks
+        // so prompts like `#nomem ...` are visible to the keyword filters.
+        if (Array.isArray(content)) {
+          return content
+            .filter((b: any) => b && b.type === "text" && typeof b.text === "string")
+            .map((b: any) => b.text)
+            .join("\n");
+        }
+        return JSON.stringify(content);
       }
     }
   } catch (e) {}
