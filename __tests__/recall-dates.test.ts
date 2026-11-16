@@ -63,7 +63,7 @@ describe("dateOnly", () => {
     expect(dateOnly("2026-11-04T17:51:05Z")).toBe("2026-11-04");
   });
 
-  it("falls back to toISOString for non-ISO parseable input", () => {
+  it("keeps the written day for non-ISO parseable input, in any host timezone", () => {
     expect(dateOnly("Nov 4, 2026")).toBe("2026-11-04");
   });
 

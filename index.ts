@@ -554,7 +554,11 @@ export function dateOnly(ts: unknown): string | undefined {
   if (m) return m[1];
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return undefined;
-  return d.toISOString().slice(0, 10);
+  // The regex above already handled ISO timestamps (UTC day). Non-ISO strings
+  // like "Nov 4, 2026" parse in local time — format the local calendar day so
+  // the date the writer meant is what displays, on hosts in any timezone.
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 // Render one recalled memory. Undated = today's exact format ("[Bank: x] - <text>");
