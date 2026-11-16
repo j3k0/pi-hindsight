@@ -298,9 +298,17 @@ function getLastUserMessage(ctx: any, fallbackPrompt: string): string {
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e.type === "message" && e.message?.role === "user") {
-        return typeof e.message.content === "string"
-          ? e.message.content
-          : JSON.stringify(e.message.content);
+        const content = e.message.content;
+        if (typeof content === "string") return content;
+        // pi stores user messages as an array of blocks; join the text blocks
+        // so prompts like `#nomem ...` are visible to the keyword filters.
+        if (Array.isArray(content)) {
+          return content
+            .filter((b: any) => b && b.type === "text" && typeof b.text === "string")
+            .map((b: any) => b.text)
+            .join("\n");
+        }
+        return JSON.stringify(content);
       }
     }
   } catch (e) {}
@@ -546,7 +554,11 @@ export function dateOnly(ts: unknown): string | undefined {
   if (m) return m[1];
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return undefined;
-  return d.toISOString().slice(0, 10);
+  // The regex above already handled ISO timestamps (UTC day). Non-ISO strings
+  // like "Nov 4, 2026" parse in local time — format the local calendar day so
+  // the date the writer meant is what displays, on hosts in any timezone.
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 // Render one recalled memory. Undated = today's exact format ("[Bank: x] - <text>");
