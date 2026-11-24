@@ -10,7 +10,10 @@ of recall, and the observations built on it are rebuilt from their other sources
 1. Only world/experience facts (observations can't be curated; they follow their sources).
 2. The text names exactly one issue: `FOV-123` / `FOV-123a`, a full issue UUID, or an `01a…`
    prefix that matches one issue. `MUL-…`, unknown numbers and ambiguous prefixes are reported
-   as unresolvable; two or more refs are skipped.
+   as unresolvable; two or more refs are skipped. A letter suffix (`FOV-2735a`) is a decision
+   page revision on that issue, not a sub-issue, so it is judged by the issue itself. A short
+   prefix counts only right after "issue"/"multica"; a bare prefix that matches an issue makes
+   the fact unresolvable (it may be a task or comment id from the same minute).
 3. Issue not closed → skipped, no LLM call.
 4. Two LLM passes (`deepseek-flash` via the LiteLLM gateway): first `pending` / `mixed` /
    `other`; then every `pending` gets a stricter "now false and nothing worth keeping?"
@@ -27,7 +30,7 @@ python3 -I hindsight_status_gc.py --revert LOG    # undo everything LOG invalida
 ```
 
 Logs and the label cache go to `~/.local/state/hindsight-status-gc/` (they hold memory text:
-keep them out of shared folders). Exit code 1 if any PATCH failed.
+kept out of shared folders, dir mode 0700). Exit code 1 if any PATCH or classifier call failed.
 
 ## Schedule (proposed, not installed)
 

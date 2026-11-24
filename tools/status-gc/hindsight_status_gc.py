@@ -41,6 +41,9 @@ CLOSED = {"done", "cancelled", "released"}
 FOV = re.compile(r"\bFOV-(\d+)(?:[a-z]\b|\b)")
 UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 SHORT = re.compile(r"\b(01a[0-9a-f]{4,5})\b(?!-)")  # issue ids are UUIDv7: 01a0…/01a1…/01a2…
+# A short prefix only counts as an issue when "issue"/"multica" comes just before it: a bare one
+# may be a task or comment id from the same minute. A bare prefix matching an issue is unresolvable.
+SHORT_CTX = re.compile(r"\b(?:issue|multica)\b[^.\n]{0,20}?\b(01a[0-9a-f]{4,5})\b(?!-)", re.I)
 MUL = re.compile(r"\bMUL-\d+\b")
 LABELS = {"pending", "mixed", "other", "stale", "keep"}
 PROMPT = """You label memories an AI agent stored about work items (Multica issues).
@@ -166,9 +169,14 @@ def issue_refs(text, issues, by_uuid):
         if u in by_uuid:
             refs.add(by_uuid[u])
         # a full UUID that is not an issue is a task/comment/memory id: not an issue ref
+    ctx = set(SHORT_CTX.findall(text))
     for s in SHORT.findall(text):
-        hits = [ident for u, ident in by_uuid.items() if u.startswith(s)]
-        (refs.add(hits[0]) if len(set(hits)) == 1 else bad.append(s))
+        hits = {ident for u, ident in by_uuid.items() if u.startswith(s)}
+        if s in ctx and len(hits) == 1:
+            refs |= hits
+        elif hits:
+            bad.append(s)
+        # a bare prefix matching no issue is a commit or other id: not an issue ref
     bad += MUL.findall(text)
     return refs, bad
 
@@ -228,7 +236,8 @@ def run(args):
     issues = load_issues(args.cli)
     by_uuid = {i["id"]: k for k, i in issues.items()}
     state = Path(args.state_dir)
-    state.mkdir(parents=True, exist_ok=True)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    state.chmod(0o700)  # logs and cache hold memory text
     cache_f = state / "labels.json"
     cache = json.loads(cache_f.read_text()) if cache_f.exists() else {}
     mode = "apply" if args.apply else "dry-run"
@@ -238,7 +247,7 @@ def run(args):
         log.write("time\tmode\tbank\tmemory_id\tfact_type\tissue\tissue_status\tdecision\t"
                   "http_status\ttext\n")
         for bank in args.banks.split(","):
-            facts = list_facts(args, bank)
+            facts = list_facts(args, bank, state="valid")
             c = counts[bank] = collections.Counter()
             rows, todo = [], []
             for f in facts:
@@ -294,7 +303,9 @@ def run(args):
                     1 for srcs in obs.values() if doomed & set(srcs))
             print(f"{bank}: {dict(c)}", file=sys.stderr)
     print(json.dumps({"mode": mode, "log": str(log_f), "per_bank": counts}, indent=1))
-    return 1 if any(k.startswith("failed") for c in counts.values() for k in c) else 0
+    # exit 1 on a failed PATCH or any classifier failure, so a timer run shows red
+    return 1 if any(k.startswith(("failed", "unresolvable: classifier")) for c in counts.values()
+                    for k in c) else 0
 
 
 def revert(args):
