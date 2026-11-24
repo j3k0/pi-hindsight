@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily invalidation of Hindsight status memories about closed issues (FOV-2948)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
