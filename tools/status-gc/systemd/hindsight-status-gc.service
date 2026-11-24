@@ -1,0 +1,14 @@
+[Unit]
+Description=Hindsight: invalidate status memories about closed Multica issues (FOV-2948)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=%h
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin:%h/bin
+Environment=MULTICA_CLI_PATH=/opt/projects/tools/multica-local-workdir/bin/multica
+EnvironmentFile=/opt/projects/litellm-proxy/litellm-key.env
+TimeoutStartSec=3600
+# Runs the detached, reviewed worktree (SACompliance, FOV-2948): update it only with
+# `git -C /opt/projects/tools/hindsight-status-gc checkout --detach <reviewed sha>`.
+ExecStart=/usr/bin/python3 -I /opt/projects/tools/hindsight-status-gc/tools/status-gc/hindsight_status_gc.py --apply

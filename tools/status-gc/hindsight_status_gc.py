@@ -238,11 +238,16 @@ def run(args):
     state = Path(args.state_dir)
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     state.chmod(0o700)  # logs and cache hold memory text
+    cutoff = dt.datetime.now().timestamp() - args.keep_logs_days * 86400
+    for old in state.glob("*.tsv"):  # retention: --revert needs a log, so keep a quarter
+        if old.stat().st_mtime < cutoff:
+            old.unlink()
     cache_f = state / "labels.json"
     cache = json.loads(cache_f.read_text()) if cache_f.exists() else {}
     mode = "apply" if args.apply else "dry-run"
     log_f = Path(args.log or state / f"{now()[:19].replace(':', '')}-{mode}.tsv")
     counts = {}
+    total_confirmed = 0
     with open(log_f, "w") as log:
         log.write("time\tmode\tbank\tmemory_id\tfact_type\tissue\tissue_status\tdecision\t"
                   "http_status\ttext\n")
@@ -274,6 +279,14 @@ def run(args):
                       CONFIRM, args.confirm_model)
             cache_f.write_text(json.dumps(cache))
             doomed = set()
+            confirmed = sum(1 for _, _, _, k in rows if k in confirm and cache.get(confirm[k]) == "stale")
+            if args.apply and total_confirmed + confirmed > args.max_invalidate:
+                print(f"ABORT before any PATCH on {bank}: {total_confirmed + confirmed} facts to "
+                      f"invalidate this run > --max-invalidate {args.max_invalidate}. Check the "
+                      f"classifier (alias remap?) with a dry run.", file=sys.stderr)
+                c["aborted: over cap"] = confirmed
+                break
+            total_confirmed += confirmed
             for f, iss, status, key in rows:
                 if key.startswith("unresolvable"):
                     decision, http_st = key, ""
@@ -294,6 +307,8 @@ def run(args):
                         doomed.add(f["id"])
                 c[decision if not decision.startswith(("skip: ", "failed")) else
                   decision.split(" (")[0]] += 1
+                if args.apply and decision.startswith("skipped"):
+                    continue  # apply logs keep what --revert and the report need, not every skip
                 text = " ".join(f["text"].split())[:300]
                 log.write(f"{now()}\t{mode}\t{bank}\t{f['id']}\t{f['fact_type']}\t{iss}\t{status}\t"
                           f"{decision}\t{http_st}\t{text}\n")
@@ -304,7 +319,8 @@ def run(args):
             print(f"{bank}: {dict(c)}", file=sys.stderr)
     print(json.dumps({"mode": mode, "log": str(log_f), "per_bank": counts}, indent=1))
     # exit 1 on a failed PATCH or any classifier failure, so a timer run shows red
-    return 1 if any(k.startswith(("failed", "unresolvable: classifier")) for c in counts.values()
+    return 1 if any(k.startswith(("failed", "unresolvable: classifier", "aborted"))
+                    for c in counts.values()
                     for k in c) else 0
 
 
@@ -337,6 +353,9 @@ def main():
     ap.add_argument("--llm-model", default="deepseek-flash")
     ap.add_argument("--confirm-model", default="deepseek-flash",
                     help="model for the second, stricter pass on 'pending' facts")
+    ap.add_argument("--max-invalidate", type=int, default=200,
+                    help="--apply aborts before patching a bank that would take the run past this")
+    ap.add_argument("--keep-logs-days", type=int, default=90)
     ap.add_argument("--batch", type=int, default=25)
     ap.add_argument("--workers", type=int, default=6)
     args = ap.parse_args()

@@ -32,22 +32,27 @@ python3 -I hindsight_status_gc.py --revert LOG    # undo everything LOG invalida
 Logs and the label cache go to `~/.local/state/hindsight-status-gc/` (they hold memory text:
 kept out of shared folders, dir mode 0700). Exit code 1 if any PATCH or classifier call failed.
 
-## Schedule (proposed, not installed)
+## Guards
 
-Daily is enough: a run only classifies facts it hasn't seen, and issues close a few dozen a day.
+- `--max-invalidate 200`: `--apply` aborts before patching a bank that would take the run past
+  the cap, and exits 1. It catches a drifted model (the `deepseek-flash` alias can be remapped in
+  LiteLLM without changing the cache key). A first backfill needs a higher cap on purpose.
+- Apply logs keep only invalidated / unresolvable / failed rows; logs older than 90 days are
+  pruned (`--keep-logs-days`). `--revert` needs the log, so a revert is possible for 90 days.
+- Exit 1 on a failed PATCH, a classifier failure or the cap. Nothing watches the unit's failed
+  state yet: the backstop is the periodic re-measure on FOV-2948 (first 2026-12-01).
+
+## Schedule (devbox3, jeko user timer)
+
+Units are versioned in `systemd/` and symlinked. The service runs a **detached worktree at a
+reviewed commit**, never the shared checkout:
 
 ```
-# ~/.config/systemd/user/hindsight-status-gc.service
-[Service]
-Type=oneshot
-EnvironmentFile=/opt/projects/litellm-proxy/litellm-key.env
-Environment=MULTICA_CLI_PATH=/usr/local/bin/multica
-ExecStart=/usr/bin/python3 -I /opt/projects/tools/pi-hindsight/tools/status-gc/hindsight_status_gc.py --apply
-
-# ~/.config/systemd/user/hindsight-status-gc.timer
-[Timer]
-OnCalendar=*-*-* 03:30 UTC
-Persistent=true
-[Install]
-WantedBy=timers.target
+git -C /opt/projects/tools/pi-hindsight worktree add --detach /opt/projects/tools/hindsight-status-gc <sha>
+ln -s /opt/projects/tools/hindsight-status-gc/tools/status-gc/systemd/hindsight-status-gc.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user start hindsight-status-gc.service      # one manual run, check the journal
+systemctl --user enable --now hindsight-status-gc.timer # daily 03:30 UTC
 ```
+
+Update after review: `git -C /opt/projects/tools/hindsight-status-gc checkout --detach <sha>`.
